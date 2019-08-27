@@ -1,0 +1,54 @@
+stages:
+  - test
+  - build
+  - release
+
+variables:
+  CONTAINER_TEST_IMAGE: $CI_REGISTRY_IMAGE:$CI_COMMIT_REF_SLUG
+  CONTAINER_RELEASE_IMAGE: $CI_REGISTRY_IMAGE:latest
+  PACKAGE_PATH: /go/src/github.com/aristio/count
+
+# A hack to make Golang-in-Gitlab happy
+.anchors:
+  - &inject-gopath
+      mkdir -p $(dirname ${PACKAGE_PATH})
+      && ln -s ${CI_PROJECT_DIR} ${PACKAGE_PATH}
+      && cd ${PACKAGE_PATH}
+      && export GO111MODULE=on
+      && export PATH="$PATH:/go/bin"
+      && echo $PATH
+
+before_script:
+  - docker login -u gitlab-ci-token -p $CI_JOB_TOKEN 10.251.4.82:5000
+
+test:
+  stage: test
+  image: golang:1.11
+  before_script:
+    - *inject-gopath
+  script:
+    - go mod download
+    - go test
+
+build:
+  image: docker:stable
+  services:
+    - name: docker:dind
+      command: ["--insecure-registry=10.251.4.82:5000"]
+  stage: build
+  script:
+    - docker build --pull -t $CONTAINER_TEST_IMAGE .
+    - docker push $CONTAINER_TEST_IMAGE
+
+release:
+  image: docker:stable
+  services:
+    - name: docker:dind
+      command: ["--insecure-registry=10.251.4.82:5000"]
+  stage: release
+  script:
+    - docker pull $CONTAINER_TEST_IMAGE
+    - docker tag $CONTAINER_TEST_IMAGE $CONTAINER_RELEASE_IMAGE
+    - docker push $CONTAINER_RELEASE_IMAGE
+  only:
+    - tags
